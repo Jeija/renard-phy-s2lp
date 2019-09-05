@@ -1,0 +1,3 @@
+[submodule "librenard"]
+	path = librenard
+	url = https://github.com/Jeija/librenard
