@@ -131,15 +131,9 @@ static void renard_phy_s2lp_rx_rf_init(void)
 /**********************************************************************************************************************/
 
 /*
- * Public interface
+ * Other private functions
  */
-void renard_phy_s2lp_init(void)
-{
-	renard_phy_s2lp_hal_init();
-}
-
-
-void renard_phy_s2lp_mode(renard_phy_s2lp_mode_t mode)
+static void renard_phy_s2lp_reset(void)
 {
 	/* Power-On-Reset S2-LP (see datasheet "5.2 Power-On-Reset") */
 	renard_phy_s2lp_hal_shutdown(true);
@@ -149,6 +143,25 @@ void renard_phy_s2lp_mode(renard_phy_s2lp_mode_t mode)
 	renard_phy_s2lp_hal_interrupt_timeout(2);
 	renard_phy_s2lp_hal_interrupt_wait();
 	renard_phy_s2lp_hal_interrupt_clear();
+}
+
+/**********************************************************************************************************************/
+
+/*
+ * Public interface
+ */
+bool renard_phy_s2lp_init(void)
+{
+	renard_phy_s2lp_hal_init();
+
+	/* Check if S2-LP responds to SPI commands by verifying PARTNUM and VERSION information */
+	return (renard_phy_s2lp_read(DEVICE_INFO1_ADDR) == 0x03) && (renard_phy_s2lp_read(DEVICE_INFO0_ADDR) == 0xc1);
+}
+
+
+void renard_phy_s2lp_mode(renard_phy_s2lp_mode_t mode)
+{
+	renard_phy_s2lp_reset();
 
 	/*
 	 * Choose correct digital domain clock: f_XO or f_XO / 2
@@ -158,16 +171,10 @@ void renard_phy_s2lp_mode(renard_phy_s2lp_mode_t mode)
 	 */
 	renard_phy_s2lp_write(XO_RCO_CONF1_ADDR, 0x2e | ((DISABLE_CLKDIV << 4) & 0x10));
 
-	switch (mode) {
-	case S2LP_MODE_TX:
+	if (mode == S2LP_MODE_TX)
 		renard_phy_s2lp_tx_rf_init();
-		break;
-	case S2LP_MODE_RX:
+	else
 		renard_phy_s2lp_rx_rf_init();
-		break;
-	default:
-		break;
-	}
 }
 
 void renard_phy_s2lp_stop(void)

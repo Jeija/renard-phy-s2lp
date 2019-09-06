@@ -24,7 +24,7 @@ typedef enum
 	S2LP_MODE_RX
 } renard_phy_s2lp_mode_t;
 
-void renard_phy_s2lp_init(void);
+bool renard_phy_s2lp_init(void);
 
 void renard_phy_s2lp_mode(renard_phy_s2lp_mode_t mode);
 void renard_phy_s2lp_stop(void);
