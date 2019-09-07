@@ -153,6 +153,7 @@ static void renard_phy_s2lp_reset(void)
 bool renard_phy_s2lp_init(void)
 {
 	renard_phy_s2lp_hal_init();
+	renard_phy_s2lp_reset();
 
 	/* Check if S2-LP responds to SPI commands by verifying PARTNUM and VERSION information */
 	return (renard_phy_s2lp_read(DEVICE_INFO1_ADDR) == 0x03) && (renard_phy_s2lp_read(DEVICE_INFO0_ADDR) == 0xc1);
