@@ -138,8 +138,8 @@ renard_phy_s2lp_protocol_error_t renard_phy_s2lp_protocol_transfer(sfx_commoninf
 		}
 	}
 
-	/* increment uplink sequence number - must be done last, since downlink also uses SN! */
-	common->seqnum = (common->seqnum + 1) % 4096;
+	/* clear all interrupts (timer / gpio) */
+	renard_phy_s2lp_hal_interrupt_clear();
 
 	return timeout ? PROTOCOL_ERROR_TIMEOUT : PROTOCOL_ERROR_NONE;
 }

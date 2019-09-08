@@ -323,7 +323,6 @@ bool renard_phy_s2lp_rx(uint8_t *frame, int16_t *rssi)
 
 	/* stop RX, disable interrupts */
 	renard_phy_s2lp_cmd(CMD_SABORT);
-	renard_phy_s2lp_hal_interrupt_clear();
 
 	if (is_gpio_ir) {
 		uint8_t length = renard_phy_s2lp_read(RX_FIFO_STATUS_ADDR);
