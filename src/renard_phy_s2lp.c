@@ -1,13 +1,24 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "renard_phy_s2lp_hal.h"
 
-#include "renard_phy_s2lp_config.h"
 #include "renard_phy_s2lp.h"
 #include "s2lp_registers.h"
+#include "conf_hardware.h"
 #include "fifo_symbols.h"
+
+/*
+ * Modulation type, see register table in datasheet:
+ * --> 0x6 is direct polar mode (used to generate DBPSK) for uplink
+ * --> 0x2 is 2-GFSK BT = 2 for downlink
+ */
+#define UPLINK_MOD_TYPE                 0x6
+#define DOWNLINK_MOD_TYPE               0x2
+
+/**********************************************************************************************************************/
 
 /*
  * Private, low-level SPI read / write functions
@@ -23,6 +34,22 @@ static void renard_phy_s2lp_cmd(uint8_t cmd)
 	out_buffer[1] = cmd;
 
 	renard_phy_s2lp_hal_spi(2, out_buffer, NULL);
+}
+
+static void renard_phy_s2lp_symbol(const uint8_t *symbol, uint8_t length)
+{
+	uint8_t symbol_poweradjusted[FIFO_CMD_LENGTH + FIFO_SYMBOL_LENGTH];
+
+	memcpy(symbol_poweradjusted, symbol, length);
+
+#if (RENARD_PHY_S2LP_HAVE_FEM == 1)
+	// If using special symbol waveforms for FEM, adjust power according to provided value (depends on RCZ and
+	// on whether we want to bypass the FEM or let it amplify the TX signal).
+	for (uint8_t i = FIFO_CMD_LENGTH + 1; i < length; i += 2)
+		symbol_poweradjusted[i] = symbol_poweradjusted[i] - RENARD_PHY_S2LP_FEM_POWER_ADJUSTMENT;
+#endif
+
+	renard_phy_s2lp_hal_spi(length, symbol_poweradjusted, NULL);
 }
 
 static void renard_phy_s2lp_write(uint8_t address, uint8_t value)
@@ -52,6 +79,57 @@ static uint8_t renard_phy_s2lp_read(uint8_t address)
 /**********************************************************************************************************************/
 
 /*
+ * Front-End Module (FEM) control functions, for S2-LP's GPIOs 0-2 connected to SKY66420-11:
+ */
+
+#if (RENARD_PHY_S2LP_HAVE_FEM == 1)
+
+typedef enum
+{
+  S2LP_FEM_MODE_SHUTDOWN = 0x00,
+  S2LP_FEM_MODE_TX_BYPASS,
+  S2LP_FEM_MODE_TX,
+  S2LP_FEM_MODE_RX
+} renard_phy_s2lp_fem_mode_t;
+
+#define S2_LP_GPIO_HIGH 0x9a
+#define S2_LP_GPIO_LOW 0xa2
+
+static void fem_mode(renard_phy_s2lp_fem_mode_t mode)
+{
+	switch (mode)
+	{
+		case S2LP_FEM_MODE_SHUTDOWN:
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CSD_GPIO, S2_LP_GPIO_LOW);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CTX_GPIO, S2_LP_GPIO_LOW);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CPS_GPIO, S2_LP_GPIO_LOW);
+			break;
+
+		case S2LP_FEM_MODE_RX:
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CSD_GPIO, S2_LP_GPIO_HIGH);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CTX_GPIO, S2_LP_GPIO_LOW);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CPS_GPIO, S2_LP_GPIO_LOW);
+			break;
+
+		case S2LP_FEM_MODE_TX_BYPASS:
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CSD_GPIO, S2_LP_GPIO_HIGH);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CTX_GPIO, S2_LP_GPIO_HIGH);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CPS_GPIO, S2_LP_GPIO_LOW);
+			break;
+
+		case S2LP_FEM_MODE_TX:
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CSD_GPIO, S2_LP_GPIO_HIGH);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CTX_GPIO, S2_LP_GPIO_HIGH);
+			renard_phy_s2lp_write(GPIOx_CONF_ADDR_OFFSET + RENARD_PHY_S2LP_FEM_CPS_GPIO, S2_LP_GPIO_HIGH);
+			break;
+	}
+}
+
+#endif
+
+/**********************************************************************************************************************/
+
+/*
  * Private RX / TX mode initialization functions
  */
 static void renard_phy_s2lp_tx_rf_init(void)
@@ -59,6 +137,8 @@ static void renard_phy_s2lp_tx_rf_init(void)
 	/* Switch to "Direct through FIFO mode" and configure power levels */
 	renard_phy_s2lp_write(PCKTCTRL1_ADDR, 0x04);
 	renard_phy_s2lp_write(PA_POWER0_ADDR, 0x07);
+
+	renard_phy_s2lp_write(PA_CONFIG1_ADDR, 0x01);
 
 	/*
 	 * Configure SMPS switching frequency and setup PA configuration:
@@ -70,7 +150,7 @@ static void renard_phy_s2lp_tx_rf_init(void)
 	renard_phy_s2lp_write(PM_CONF2_ADDR, 0x28);
 	renard_phy_s2lp_write(PA_CONFIG1_ADDR, renard_phy_s2lp_read(PA_CONFIG1_ADDR) & 0xfd);
 	renard_phy_s2lp_write(PA_CONFIG0_ADDR, 0xc8);
-	renard_phy_s2lp_write(SYNTH_CONFIG2_ADDR, 0xd7);
+	renard_phy_s2lp_write(SYNTH_CONFIG2_ADDR, 0xd3);
 }
 
 static void renard_phy_s2lp_rx_rf_init(void)
@@ -186,6 +266,17 @@ void renard_phy_s2lp_stop(void)
 
 void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate, uint8_t size)
 {
+#if RENARD_PHY_S2LP_HAVE_FEM == 1
+	/*
+	 * Optional, if present: Configure front-end module
+	 */
+#if REANRD_PHY_S2LP_FEM_BYPASS == 1
+	fem_mode(S2LP_FEM_MODE_TX_BYPASS);
+#else
+	fem_mode(S2LP_FEM_MODE_TX);
+#endif
+#endif
+
 	/* Configure S2-LP data rate (100bps, 600bps) */
 	uint8_t rate_e = (datarate == UL_DATARATE_600BPS) ? UPLINK_600BPS_DATARATE_E : UPLINK_100BPS_DATARATE_E;
 	uint16_t rate_m = (datarate == UL_DATARATE_600BPS) ? UPLINK_600BPS_DATARATE_M : UPLINK_100BPS_DATARATE_M;
@@ -212,10 +303,10 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 
 	/* Transmit "Extra Symbol Before Frame": First fill FIFO, then tell S2-LP to transmit FIFO contents */
 	renard_phy_s2lp_cmd(CMD_FLUSHTXFIFO);
-	renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_BEFOREFRAME_1), (uint8_t*)FIFO_POLAR_BEFOREFRAME_1, NULL);
+	renard_phy_s2lp_symbol(FIFO_POLAR_BEFOREFRAME_1, sizeof(FIFO_POLAR_BEFOREFRAME_1));
 	renard_phy_s2lp_cmd(CMD_TX);
 	renard_phy_s2lp_hal_interrupt_wait();
-	renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_BEFOREFRAME_2), (uint8_t*)FIFO_POLAR_BEFOREFRAME_2, NULL);
+	renard_phy_s2lp_symbol(FIFO_POLAR_BEFOREFRAME_2, sizeof(FIFO_POLAR_BEFOREFRAME_2));
 
 	/* Transmit actual DBPSK bits */
 	uint8_t byte_index = 0;
@@ -230,12 +321,12 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 		renard_phy_s2lp_hal_interrupt_wait();
 		if (bit == 0) {
 			if (bit_index % 2 == 0) {
-				renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_ZERO_FDEV_NEG), (uint8_t*)FIFO_POLAR_ZERO_FDEV_NEG, NULL);
+				renard_phy_s2lp_symbol(FIFO_POLAR_ZERO_FDEV_NEG, sizeof(FIFO_POLAR_ZERO_FDEV_NEG));
 			} else {
-				renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_ZERO_FDEV_POS), (uint8_t*)FIFO_POLAR_ZERO_FDEV_POS, NULL);
+				renard_phy_s2lp_symbol(FIFO_POLAR_ZERO_FDEV_POS, sizeof(FIFO_POLAR_ZERO_FDEV_POS));
 			}
 		} else {
-			renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_ONE), (uint8_t*)FIFO_POLAR_ONE, NULL);
+			renard_phy_s2lp_symbol(FIFO_POLAR_ONE, sizeof(FIFO_POLAR_ONE));
 		}
 
 		/* Go to next bit */
@@ -249,19 +340,22 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 
 	/* Transmit first part of "Extra Symbol After Frame" */
 	renard_phy_s2lp_hal_interrupt_wait();
-	renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_AFTERFRAME_1), (uint8_t*)FIFO_POLAR_AFTERFRAME_1, NULL);
+	renard_phy_s2lp_symbol(FIFO_POLAR_AFTERFRAME_1, sizeof(FIFO_POLAR_AFTERFRAME_1));
 	renard_phy_s2lp_hal_interrupt_wait();
 
 	/* Transmit final part of "Extra Symbol After Frame" - set FIFO almost empty threshold to zero so that
 	   complete FIFO contents get transmitted */
 	renard_phy_s2lp_write(FIFO_CONFIG0_ADDR, 0x00);
-	renard_phy_s2lp_hal_spi(sizeof(FIFO_POLAR_AFTERFRAME_2), (uint8_t*)FIFO_POLAR_AFTERFRAME_2, NULL);
+	renard_phy_s2lp_symbol(FIFO_POLAR_AFTERFRAME_2, sizeof(FIFO_POLAR_AFTERFRAME_2));
 	renard_phy_s2lp_hal_interrupt_wait();
 
 	/* Stop S2-LP transmission */
 	renard_phy_s2lp_cmd(CMD_SABORT);
 	renard_phy_s2lp_cmd(CMD_FLUSHTXFIFO);
 	renard_phy_s2lp_hal_interrupt_clear();
+#if RENARD_PHY_S2LP_HAVE_FEM == 1
+	fem_mode(S2LP_FEM_MODE_SHUTDOWN);
+#endif
 }
 
 void renard_phy_s2lp_frequency(uint32_t frequency)
@@ -294,6 +388,13 @@ void renard_phy_s2lp_frequency(uint32_t frequency)
 
 bool renard_phy_s2lp_rx(uint8_t *frame, int16_t *rssi)
 {
+#if RENARD_PHY_S2LP_HAVE_FEM == 1
+	/*
+	 * Optional, if present: Configure front-end module
+	 */
+	fem_mode(S2LP_FEM_MODE_RX);
+#endif
+
 	/* disable all IRQs except for RX DATA READY */
 	renard_phy_s2lp_write(IRQ_MASK3_ADDR, 0x00);
 	renard_phy_s2lp_write(IRQ_MASK2_ADDR, 0x00);
@@ -323,6 +424,9 @@ bool renard_phy_s2lp_rx(uint8_t *frame, int16_t *rssi)
 
 	/* stop RX, disable interrupts */
 	renard_phy_s2lp_cmd(CMD_SABORT);
+#if RENARD_PHY_S2LP_HAVE_FEM == 1
+	fem_mode(S2LP_FEM_MODE_SHUTDOWN);
+#endif
 
 	if (is_gpio_ir) {
 		uint8_t length = renard_phy_s2lp_read(RX_FIFO_STATUS_ADDR);

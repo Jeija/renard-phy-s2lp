@@ -1,4 +1,32 @@
 /*
+ * This file loads the hardware configuration for renard-phy-s2lp.
+ *
+ * The configuration tells wheter or not the S2-LP sits behind a front-end module (FEM) such as the SKY66420-11 and, if
+ * applicable, how that FEM is connected. It also tells renard-phy-s2lp which frequency the S2-LP's crystal oscillator
+ * runs at.
+ *
+ * Which configuration to load can be determined using compile-time switches:
+ *    -DRENARD_PHY_S2LP_CONF_HT32SX for HT Micron's HT32SX
+ *    -RENARD_PHY_S2LP_CONF_FKI868V2 for STMicroelectronics FKI-868V2 board
+ * If no compile-time switch is specified, renard-phy-s2lp will use a generic template *without* front-end module,
+ * the one that you will find in this file.
+ *
+ *
+ * Note that these configuration switches do *NOT* affect the pinout between microcontroller and S2-LP, since that
+ * is determined by the hardware abstraction layers renard-phy-s2lp-hal-*
+ */
+
+#ifndef _RENARD_PHY_S2LP_CONF_H
+#define _RENARD_PHY_S2LP_CONF_H
+
+/**************************************** default values, may be overridden *******************************************/
+/*
+ * Front-end module configuration:
+ * No front-end module by default!
+ */
+#define RENARD_PHY_S2LP_HAVE_FEM 0
+
+/*
  * See "4.7. Crystal oscillator" in S2-LP datasheet for details
  *
  * XTAL frequency can either be in range 24-26MHz or in range 48-52MHz
@@ -6,14 +34,6 @@
  */
 #define S2LP_XTAL_FREQ                  50000000
 #define DISABLE_CLKDIV                  0
-
-/*
- * Modulation type, see register table in datasheet:
- * --> 0x6 is direct polar mode (used to generate DBPSK) for uplink
- * --> 0x2 is 2-GFSK BT = 2 for downlink
- */
-#define UPLINK_MOD_TYPE                 0x6
-#define DOWNLINK_MOD_TYPE               0x2
 
 /*
  * Datarate mantissa and exponent values - compute these for your XTAL frequency!
@@ -73,3 +93,15 @@
 
 #define DOWNLINK_FDEV_M                 67
 #define DOWNLINK_FDEV_E                 0
+
+#if defined(RENARD_PHY_S2LP_CONF_HT32SX)
+	#pragma message("[renard-phy-s2lp] Compiling for HT32SX")
+	#include "presets_hardware/ht32sx.h"
+#elif defined(RENARD_PHY_S2LP_CONF_FKI868V2) 
+	#pragma message("[renard-phy-s2lp] Compiling for FKI868V2")
+	#include "presets_hardware/fki868v2.h"
+#else
+	#pragma message("[renard-phy-s2lp] Compiling generic, no-frontend library")
+#endif
+
+#endif

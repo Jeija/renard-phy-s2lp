@@ -1,6 +1,7 @@
 TARGET := renard-phy-s2lp.a
 SRCDIR := src/
 OBJDIR := obj/
+CFGDIR := conf/
 
 LIBRENARD_DIR := librenard/
 LIBRENARD_INCDIR := $(LIBRENARD_DIR)src
@@ -26,7 +27,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 $(OBJDIR)%.o: $(SRCDIR)%.c
-	$(CC) -c $(ARCHFLAGS) $(CFLAGS) -MMD -MP $< -o $@
+	$(CC) -c $(ARCHFLAGS) $(CFLAGS) -I$(CFGDIR) -MMD -MP $< -o $@
 
 clean:
 	$(MAKE) -C $(LIBRENARD_DIR) clean

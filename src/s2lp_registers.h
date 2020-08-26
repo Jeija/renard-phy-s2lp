@@ -1,4 +1,5 @@
 /* S2-LP Register Addresses, see datasheet "10 Register Contents" - Table 62 */
+#define GPIOx_CONF_ADDR_OFFSET 0x00
 #define GPIO0_CONF_ADDR 0x00
 #define GPIO1_CONF_ADDR 0x01
 #define GPIO2_CONF_ADDR 0x02
