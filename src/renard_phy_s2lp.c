@@ -358,8 +358,6 @@ void renard_phy_s2lp_tx(uint8_t *stream, uint8_t size, renard_phy_s2lp_ul_datara
 
 void renard_phy_s2lp_frequency(uint32_t frequency)
 {
-	printf("freq: %ld\r\n", frequency);
-
 	/*
 	 * Frequency selection is explained in datasheet section 5.3.1, equations 6 / 7 / 8 / 9:
 	 * Since CHNUM = 0, f_c = f_base here, so equation 7 effectively defines frequency selection:
