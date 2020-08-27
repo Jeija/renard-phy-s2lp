@@ -5,6 +5,7 @@
 
 #include "renard_phy_s2lp_hal.h"
 
+#include "renard_phy_s2lp_rc_profiles.h"
 #include "renard_phy_s2lp.h"
 #include "s2lp_registers.h"
 #include "conf_hardware.h"
@@ -36,17 +37,17 @@ static void renard_phy_s2lp_cmd(uint8_t cmd)
 	renard_phy_s2lp_hal_spi(2, out_buffer, NULL);
 }
 
-static void renard_phy_s2lp_symbol(const uint8_t *symbol, uint8_t length)
+static void renard_phy_s2lp_symbol(const uint8_t *symbol, uint8_t length, renard_phy_s2lp_rc_t rc_profile)
 {
 	uint8_t symbol_poweradjusted[FIFO_CMD_LENGTH + FIFO_SYMBOL_LENGTH];
 
 	memcpy(symbol_poweradjusted, symbol, length);
 
 #if (RENARD_PHY_S2LP_HAVE_FEM == 1)
-	// If using special symbol waveforms for FEM, adjust power according to provided value (depends on RCZ and
+	// If using special symbol waveforms for FEM, adjust power according to provided value (depends on RC profile and
 	// on whether we want to bypass the FEM or let it amplify the TX signal).
 	for (uint8_t i = FIFO_CMD_LENGTH + 1; i < length; i += 2)
-		symbol_poweradjusted[i] = symbol_poweradjusted[i] - RENARD_PHY_S2LP_FEM_POWER_ADJUSTMENT;
+		symbol_poweradjusted[i] = symbol_poweradjusted[i] - renard_phy_s2lp_fem_power_adjustment_by_rc[rc_profile];
 #endif
 
 	renard_phy_s2lp_hal_spi(length, symbol_poweradjusted, NULL);
@@ -264,17 +265,14 @@ void renard_phy_s2lp_stop(void)
 	renard_phy_s2lp_hal_shutdown(true);
 }
 
-void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate, uint8_t size)
+void renard_phy_s2lp_tx(uint8_t *stream, uint8_t size, renard_phy_s2lp_ul_datarate_t datarate,
+		renard_phy_s2lp_rc_t rc_profile)
 {
 #if RENARD_PHY_S2LP_HAVE_FEM == 1
 	/*
 	 * Optional, if present: Configure front-end module
 	 */
-#if REANRD_PHY_S2LP_FEM_BYPASS == 1
-	fem_mode(S2LP_FEM_MODE_TX_BYPASS);
-#else
-	fem_mode(S2LP_FEM_MODE_TX);
-#endif
+	fem_mode(renard_phy_s2lp_bypass_fem_by_rc[rc_profile] ? S2LP_FEM_MODE_TX_BYPASS : S2LP_FEM_MODE_TX);
 #endif
 
 	/* Configure S2-LP data rate (100bps, 600bps) */
@@ -303,10 +301,10 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 
 	/* Transmit "Extra Symbol Before Frame": First fill FIFO, then tell S2-LP to transmit FIFO contents */
 	renard_phy_s2lp_cmd(CMD_FLUSHTXFIFO);
-	renard_phy_s2lp_symbol(FIFO_POLAR_BEFOREFRAME_1, sizeof(FIFO_POLAR_BEFOREFRAME_1));
+	renard_phy_s2lp_symbol(FIFO_POLAR_BEFOREFRAME_1, sizeof(FIFO_POLAR_BEFOREFRAME_1), rc_profile);
 	renard_phy_s2lp_cmd(CMD_TX);
 	renard_phy_s2lp_hal_interrupt_wait();
-	renard_phy_s2lp_symbol(FIFO_POLAR_BEFOREFRAME_2, sizeof(FIFO_POLAR_BEFOREFRAME_2));
+	renard_phy_s2lp_symbol(FIFO_POLAR_BEFOREFRAME_2, sizeof(FIFO_POLAR_BEFOREFRAME_2), rc_profile);
 
 	/* Transmit actual DBPSK bits */
 	uint8_t byte_index = 0;
@@ -321,12 +319,12 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 		renard_phy_s2lp_hal_interrupt_wait();
 		if (bit == 0) {
 			if (bit_index % 2 == 0) {
-				renard_phy_s2lp_symbol(FIFO_POLAR_ZERO_FDEV_NEG, sizeof(FIFO_POLAR_ZERO_FDEV_NEG));
+				renard_phy_s2lp_symbol(FIFO_POLAR_ZERO_FDEV_NEG, sizeof(FIFO_POLAR_ZERO_FDEV_NEG), rc_profile);
 			} else {
-				renard_phy_s2lp_symbol(FIFO_POLAR_ZERO_FDEV_POS, sizeof(FIFO_POLAR_ZERO_FDEV_POS));
+				renard_phy_s2lp_symbol(FIFO_POLAR_ZERO_FDEV_POS, sizeof(FIFO_POLAR_ZERO_FDEV_POS), rc_profile);
 			}
 		} else {
-			renard_phy_s2lp_symbol(FIFO_POLAR_ONE, sizeof(FIFO_POLAR_ONE));
+			renard_phy_s2lp_symbol(FIFO_POLAR_ONE, sizeof(FIFO_POLAR_ONE), rc_profile);
 		}
 
 		/* Go to next bit */
@@ -340,13 +338,13 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 
 	/* Transmit first part of "Extra Symbol After Frame" */
 	renard_phy_s2lp_hal_interrupt_wait();
-	renard_phy_s2lp_symbol(FIFO_POLAR_AFTERFRAME_1, sizeof(FIFO_POLAR_AFTERFRAME_1));
+	renard_phy_s2lp_symbol(FIFO_POLAR_AFTERFRAME_1, sizeof(FIFO_POLAR_AFTERFRAME_1), rc_profile);
 	renard_phy_s2lp_hal_interrupt_wait();
 
 	/* Transmit final part of "Extra Symbol After Frame" - set FIFO almost empty threshold to zero so that
 	   complete FIFO contents get transmitted */
 	renard_phy_s2lp_write(FIFO_CONFIG0_ADDR, 0x00);
-	renard_phy_s2lp_symbol(FIFO_POLAR_AFTERFRAME_2, sizeof(FIFO_POLAR_AFTERFRAME_2));
+	renard_phy_s2lp_symbol(FIFO_POLAR_AFTERFRAME_2, sizeof(FIFO_POLAR_AFTERFRAME_2), rc_profile);
 	renard_phy_s2lp_hal_interrupt_wait();
 
 	/* Stop S2-LP transmission */
@@ -360,6 +358,8 @@ void renard_phy_s2lp_tx(uint8_t *stream, renard_phy_s2lp_ul_datarate_t datarate,
 
 void renard_phy_s2lp_frequency(uint32_t frequency)
 {
+	printf("freq: %ld\r\n", frequency);
+
 	/*
 	 * Frequency selection is explained in datasheet section 5.3.1, equations 6 / 7 / 8 / 9:
 	 * Since CHNUM = 0, f_c = f_base here, so equation 7 effectively defines frequency selection:
@@ -369,14 +369,17 @@ void renard_phy_s2lp_frequency(uint32_t frequency)
 	 * The maximum error we make by rounding synth to an integer is on the order of 25Hz which is safe to ignore
 	 * considering the error due to XTAL imperfections can be >15kHz (20ppm XTAL)
 	 */
-	uint32_t synth = ((uint64_t)1 << 19) * 4 * frequency / S2LP_XTAL_FREQ;
+	uint32_t synth_freq = 4 * frequency;
+	uint32_t synth = ((uint64_t)1 << 19) * synth_freq / S2LP_XTAL_FREQ;
 
 	/*
-	 * Charge pump configuration, see datsheet section 5.3.
+	 * Charge pump configuration, see datsheet section 5.3 and table 37: "Charge pump words"
 	 * The logic for selecting PLL_PFD_SPLIT_EN and PLL_CP_ISEL has been taken from X-CUBE-SFXS2LP1
 	 */
 	uint8_t pll_pfd_split_en = DISABLE_CLKDIV ? 1 : 0;
-	uint8_t pll_cp_isel = DISABLE_CLKDIV ? 0x02 : 0x03;
+	uint8_t pll_cp_isel = (synth_freq < 3600000000) ?
+		(DISABLE_CLKDIV ? 0x02 : 0x03) :
+		(DISABLE_CLKDIV ? 0x01 : 0x02);
 
 	renard_phy_s2lp_write(SYNTH_CONFIG2_ADDR, (renard_phy_s2lp_read(SYNTH_CONFIG2_ADDR) & (~0x04)) |
 			(pll_pfd_split_en << 2));

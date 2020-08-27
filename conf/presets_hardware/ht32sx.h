@@ -17,8 +17,6 @@
 #define RENARD_PHY_S2LP_FEM_CTX_GPIO 0
 #define RENARD_PHY_S2LP_FEM_CPS_GPIO 1
 
-#define REANRD_PHY_S2LP_FEM_BYPASS 1
-
 /*
  * S2-LP output power configuration
  * Power is increased by the following amount compared to a baseline; measure output power to determine effect.

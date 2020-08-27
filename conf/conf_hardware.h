@@ -16,8 +16,8 @@
  * is determined by the hardware abstraction layers renard-phy-s2lp-hal-*
  */
 
-#ifndef _RENARD_PHY_S2LP_CONF_H
-#define _RENARD_PHY_S2LP_CONF_H
+#ifndef _RENARD_PHY_S2LP_CONF_HARDWARE_H
+#define _RENARD_PHY_S2LP_CONF_HARDWARE_H
 
 /**************************************** default values, may be overridden *******************************************/
 /*

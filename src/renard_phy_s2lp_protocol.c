@@ -6,25 +6,20 @@
 
 #include "renard_phy_s2lp_hal.h"
 
+#include "renard_phy_s2lp_rc_profiles.h"
 #include "renard_phy_s2lp_protocol.h"
 #include "renard_phy_s2lp.h"
 
 /*
  * See public Sigfox specifications "2.2 Frequency ranges, macro- and micro- channels",
  * 4.9.1 Time intervals in B-procedures, "4.9.2 Frequency selection in B-procedure".
- * Frequencies in Hz, durations in ms. Definitions here are only valid for RC1!
+ * Frequencies in Hz, durations in ms. Definitions here are only valid for RC1 and RC2!
  */
-#define FREQUENCY_BOUND_LOW 868030000
-#define FREQUENCY_BOUND_HIGH 868230000
-#define FREQUENCY_MF 6000
-#define FREQUENCY_GAP 1395000
-
 #define INTERVAL_INTERFRAME 500
 #define INTERVAL_UL_TO_DL 20000
 #define INTERVAL_DL_WINDOW 25000
 
 static uint16_t m_random_current;
-static renard_phy_s2lp_ul_datarate_t m_datarate;
 
 /*
  * 16-bit XORshift
@@ -39,15 +34,21 @@ uint16_t random_next()
 	return m_random_current;
 }
 
-void renard_phy_s2lp_protocol_init(uint16_t random, renard_phy_s2lp_ul_datarate_t datarate)
+void renard_phy_s2lp_protocol_init(uint16_t random)
 {
 	m_random_current = random == 0 ? 1 : random;
-	m_datarate = datarate;
 }
 
 renard_phy_s2lp_protocol_error_t renard_phy_s2lp_protocol_transfer(sfx_commoninfo *common, sfx_ul_plain *uplink,
-		sfx_dl_plain *downlink, int16_t *downlink_rssi)
+		sfx_dl_plain *downlink, renard_phy_s2lp_rc_t rc_profile, renard_phy_s2lp_ul_datarate_t datarate,
+		int16_t *downlink_rssi)
 {
+	/*
+	 * Check if we're allowed to use desired data rate in given Sigfox Radio Configuration
+	 */
+	if (!renard_phy_s2lp_baudrates_allowed_by_rc[rc_profile][datarate])
+		return PROTOCOL_ERROR_INVALID_PROFILE;
+
 	/*
 	 * Encode uplink using librenard
 	 */
@@ -58,8 +59,11 @@ renard_phy_s2lp_protocol_error_t renard_phy_s2lp_protocol_transfer(sfx_commoninf
 	/*
 	 * Randomly choose initial uplink's carrier frequency
 	 */
-	uint32_t lowerbound = FREQUENCY_BOUND_LOW + (uplink->replicas ? FREQUENCY_MF : 0);
-	uint32_t upperbound = FREQUENCY_BOUND_HIGH - (uplink->replicas ? FREQUENCY_MF : 0);
+	uint32_t freq_interframe_gap = renard_phy_s2lp_freq_interframe_gap_by_rc[rc_profile];
+	uint32_t lowerbound = renard_phy_s2lp_freq_bound_low_by_rc[rc_profile] +
+			(uplink->replicas ? freq_interframe_gap : 0);
+	uint32_t upperbound = renard_phy_s2lp_freq_bound_high_by_rc[rc_profile] -
+			(uplink->replicas ? freq_interframe_gap : 0);
 	uint32_t initial_uplink_frequency = lowerbound + (uint64_t)(upperbound - lowerbound) * random_next() / 0xffff;
 
 	/*
@@ -80,13 +84,13 @@ renard_phy_s2lp_protocol_error_t renard_phy_s2lp_protocol_transfer(sfx_commoninf
 		/* Switch to correct frequency: Initial frame, first replica or second replica frequency */
 		uint32_t frequency = initial_uplink_frequency;
 		if (fcount == 1)
-			frequency = initial_uplink_frequency + FREQUENCY_MF;
+			frequency = initial_uplink_frequency + freq_interframe_gap;
 		else if (fcount == 2)
-			frequency = initial_uplink_frequency - FREQUENCY_MF;
+			frequency = initial_uplink_frequency - freq_interframe_gap;
 		renard_phy_s2lp_frequency(frequency);
 
 		/* Transmit actual uplink */
-		renard_phy_s2lp_tx(bytestream, m_datarate, ul_bytestream_len);
+		renard_phy_s2lp_tx(bytestream, ul_bytestream_len, datarate, rc_profile);
 
 		/* Wait interframe period */
 		if (uplink->replicas && fcount < 2) {
@@ -111,7 +115,7 @@ renard_phy_s2lp_protocol_error_t renard_phy_s2lp_protocol_transfer(sfx_commoninf
 		uint32_t replica_duration = 0;
 		if (uplink->replicas) {
 			replica_duration += 2 * INTERVAL_INTERFRAME;
-			uint32_t symbol_duration_us = (m_datarate == UL_DATARATE_600BPS ? 1667 : 10000);
+			uint32_t symbol_duration_us = (datarate == UL_DATARATE_600BPS ? 1667 : 10000);
 			replica_duration += 2 * ul_bytestream_len * 8 * symbol_duration_us / 1000;
 		}
 		renard_phy_s2lp_hal_interrupt_timeout(INTERVAL_UL_TO_DL - replica_duration);
@@ -120,7 +124,7 @@ renard_phy_s2lp_protocol_error_t renard_phy_s2lp_protocol_transfer(sfx_commoninf
 		/* Put S2-LP in RX mode and start downlink window timer */
 		sfx_dl_encoded dl_encoded;
 		renard_phy_s2lp_mode(S2LP_MODE_RX);
-		renard_phy_s2lp_frequency(initial_uplink_frequency + FREQUENCY_GAP);
+		renard_phy_s2lp_frequency(initial_uplink_frequency + renard_phy_s2lp_freq_ul_dl_gap_by_rc[rc_profile]);
 		renard_phy_s2lp_hal_interrupt_timeout(INTERVAL_DL_WINDOW);
 
 		while (true) {
