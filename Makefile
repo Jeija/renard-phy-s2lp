@@ -7,7 +7,7 @@ LIBRENARD_DIR := librenard/
 LIBRENARD_INCDIR := $(LIBRENARD_DIR)src
 LIBRENARD := $(LIBRENARD_DIR)librenard.a
 
-CFLAGS := -I$(LIBRENARD_INCDIR) -Wall -std=c99 -Og
+CFLAGS := -I$(LIBRENARD_INCDIR) -I$(CFGDIR) -Wall -std=c99 -Og
 
 ARCHFLAGS :=
 
@@ -27,7 +27,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 $(OBJDIR)%.o: $(SRCDIR)%.c
-	$(CC) -c $(ARCHFLAGS) $(CFLAGS) -I$(CFGDIR) -MMD -MP $< -o $@
+	$(CC) -c $(ARCHFLAGS) $(CFLAGS) -MMD -MP $< -o $@
 
 clean:
 	$(MAKE) -C $(LIBRENARD_DIR) clean

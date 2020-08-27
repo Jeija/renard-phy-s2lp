@@ -101,7 +101,7 @@
 	#pragma message("[renard-phy-s2lp] Compiling for FKI868V2")
 	#include "presets_hardware/fki868v2.h"
 #else
-	#pragma message("[renard-phy-s2lp] Compiling generic, no-frontend library")
+	#pragma message("[renard-phy-s2lp] Compiling generic, no-frontend module (FEM) library")
 #endif
 
 #endif
