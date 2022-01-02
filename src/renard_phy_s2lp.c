@@ -236,8 +236,11 @@ bool renard_phy_s2lp_init(void)
 	renard_phy_s2lp_hal_init();
 	renard_phy_s2lp_reset();
 
+	uint8_t partnum = renard_phy_s2lp_read(DEVICE_INFO1_ADDR);
+	uint8_t version = renard_phy_s2lp_read(DEVICE_INFO0_ADDR);
+
 	/* Check if S2-LP responds to SPI commands by verifying PARTNUM and VERSION information */
-	return (renard_phy_s2lp_read(DEVICE_INFO1_ADDR) == 0x03) && (renard_phy_s2lp_read(DEVICE_INFO0_ADDR) == 0xc1);
+	return (partnum == 0x03) && (version == 0xc1 || version == 0x91);
 }
 
 
